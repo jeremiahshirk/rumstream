@@ -17,4 +17,4 @@ for other hosts, ports, etc.
 rumstream takes a single argument, the URL for the event stream. For example, to get all
 attributes for all objects, up to 400 events/sec:
 
-    $ ./rumstream https://$HOST/getstream?usr=$USER&pwd=$PASS&objects=all&id=1&limit=400
+    $ ./rumstream "https://$RUMHOST/getstream?usr=$RUMUSER&pwd=$RUMPASS&objects=all&id=1&limit=400"
