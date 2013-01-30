@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+require 'em-http'
+require 'riemann/client'
+require 'csv'
+
+EventMachine.run do
+  url = ARGV.first
+  http = EventMachine::HttpRequest.new(url).get
+
+  c = Riemann::Client.new host: 'localhost', port: 5555
+  headers = nil
+  partial_line = ""
+
+  http.stream  do |chunk| 
+    # chunks might not be aligned on line boundaries in CSV
+    lines = chunk.split("\n",-1)
+    lines[0] = partial_line + lines.first
+    partial_line = lines.pop # may be ""
+    lines.each do |line|
+      fields = CSV.parse(line).first
+      if fields.first == "#x-record-type"
+        headers = fields
+        headers[0] = "x-record-type"
+        p headers
+      else 
+        if headers and fields.first[0,1] != '#'
+          update =  Hash[headers.zip(fields)]
+          update['service'] = "truesight"
+          c.tcp << update
+        end
+      end
+    end
+  end
+end
