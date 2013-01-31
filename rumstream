@@ -3,55 +3,62 @@ require 'em-http'
 require 'riemann/client'
 require 'csv'
 
-EventMachine.run do
+while true
+  EventMachine.run do
 
-  recent_bytes = recent_lines = recent_chunks = 0
-  EventMachine.add_periodic_timer(5) do
-    $stderr.write "Processed #{recent_bytes}:#{recent_lines}:#{recent_chunks} bytes:lines:chunks\n"
+    url = ARGV.first
+    http = EventMachine::HttpRequest.new(url).get
+
     recent_bytes = recent_lines = recent_chunks = 0
-  end
-
-  url = ARGV.first
-  http = EventMachine::HttpRequest.new(url).get
-
-  c = Riemann::Client.new host: 'localhost', port: 5555
-  headers = nil
-  partial_line = ""
-
-  http.stream  do |chunk| 
-    recent_chunks += 1
-    recent_bytes += chunk.length
-    
-    # chunks might not be aligned on line boundaries in CSV
-    lines = chunk.split("\n",-1)
-    lines[0] = partial_line + lines.first
-    partial_line = lines.pop # may be ""
-
-    lines.each do |line|
-      recent_lines += 1
-
-      begin
-        fields = CSV.parse(line).first
-      rescue
-        print "Error parsing line:\n"
-        p line 
-        print "Partial line:\n"
-        p partial_line
-        next
+    EventMachine.add_periodic_timer(5) do
+      $stderr.write "Processed #{recent_bytes}:#{recent_lines}:#{recent_chunks} bytes:lines:chunks\n"
+      if recent_chunks == 0
+        # TODO make abort time independent of frequency of reporting loop
+        $stderr.write "Received no data, aborting.\n"
+        EventMachine.stop_event_loop
       end
-
-      if fields.first == "#x-record-type"
-        headers = fields
-        headers[0] = "x-record-type"
-        p headers
-      else 
-        if headers and fields.first[0,1] != '#'
-          update =  Hash[headers.zip(fields)]
-          update['service'] = "truesight"
-          c.tcp << update
-        end
-      end
-      
+      recent_bytes = recent_lines = recent_chunks = 0
     end
-  end
-end
+
+    c = Riemann::Client.new host: 'localhost', port: 5555
+    headers = nil
+    partial_line = ""
+
+    http.stream  do |chunk| 
+      recent_chunks += 1
+      recent_bytes += chunk.length
+      
+      # chunks might not be aligned on line boundaries in CSV
+      lines = chunk.split("\n",-1)
+      lines[0] = partial_line + lines.first
+      partial_line = lines.pop # may be ""
+
+      lines.each do |line|
+        recent_lines += 1
+
+        begin
+          fields = CSV.parse(line).first
+        rescue
+          print "Error parsing line:\n"
+          p line 
+          print "Partial line:\n"
+          p partial_line
+          next
+        end
+
+        if fields.first == "#x-record-type"
+          headers = fields
+          headers[0] = "x-record-type"
+          #p headers
+        else 
+          if headers and fields.first[0,1] != '#'
+            update =  Hash[headers.zip(fields)]
+            update['service'] = "truesight"
+            c.tcp << update
+          end
+        end
+        
+      end # lines.each
+    end # http.stream
+  end # EventMachine.run
+end # while true
