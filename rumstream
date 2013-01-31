@@ -4,6 +4,13 @@ require 'riemann/client'
 require 'csv'
 
 EventMachine.run do
+
+  recent_bytes = recent_lines = recent_chunks = 0
+  EventMachine.add_periodic_timer(5) do
+    $stderr.write "Processed #{recent_bytes}:#{recent_lines}:#{recent_chunks} bytes:lines:chunks\n"
+    recent_bytes = recent_lines = recent_chunks = 0
+  end
+
   url = ARGV.first
   http = EventMachine::HttpRequest.new(url).get
 
@@ -12,12 +19,27 @@ EventMachine.run do
   partial_line = ""
 
   http.stream  do |chunk| 
+    recent_chunks += 1
+    recent_bytes += chunk.length
+    
     # chunks might not be aligned on line boundaries in CSV
     lines = chunk.split("\n",-1)
     lines[0] = partial_line + lines.first
     partial_line = lines.pop # may be ""
+
     lines.each do |line|
-      fields = CSV.parse(line).first
+      recent_lines += 1
+
+      begin
+        fields = CSV.parse(line).first
+      rescue
+        print "Error parsing line:\n"
+        p line 
+        print "Partial line:\n"
+        p partial_line
+        next
+      end
+
       if fields.first == "#x-record-type"
         headers = fields
         headers[0] = "x-record-type"
@@ -29,6 +51,7 @@ EventMachine.run do
           c.tcp << update
         end
       end
+      
     end
   end
 end
