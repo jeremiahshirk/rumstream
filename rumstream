@@ -6,12 +6,13 @@ require 'csv'
 while true
   EventMachine.run do
 
+    riemann_host = 'cognus.ome.ksu.edu'
     url = ARGV.first
     http = EventMachine::HttpRequest.new(url).get
 
     recent_bytes = recent_lines = recent_chunks = 0
-    EventMachine.add_periodic_timer(5) do
-      $stderr.write "Processed #{recent_bytes}:#{recent_lines}:#{recent_chunks} bytes:lines:chunks\n"
+    EventMachine.add_periodic_timer(10) do
+      $stdout.write "Processed #{recent_bytes}:#{recent_lines}:#{recent_chunks} bytes:lines:chunks\n"
       if recent_chunks == 0
         # TODO make abort time independent of frequency of reporting loop
         $stderr.write "Received no data, aborting.\n"
@@ -20,40 +21,37 @@ while true
       recent_bytes = recent_lines = recent_chunks = 0
     end
 
-    c = Riemann::Client.new host: 'localhost', port: 5555
+    c = Riemann::Client.new host: riemann_host, port: 5555
     headers = nil
-    partial_line = ""
+    #partial_line = ""
+    buffer = ""
 
     http.stream  do |chunk| 
       recent_chunks += 1
       recent_bytes += chunk.length
+      buffer << chunk
       
-      # chunks might not be aligned on line boundaries in CSV
-      lines = chunk.split("\n",-1)
-      lines[0] = partial_line + lines.first
-      partial_line = lines.pop # may be ""
-
-      lines.each do |line|
+      while line = buffer.slice!(/.+\r?\n/)
         recent_lines += 1
 
         begin
           fields = CSV.parse(line).first
         rescue
-          print "Error parsing line:\n"
-          p line 
-          print "Partial line:\n"
-          p partial_line
+          $stderr.write "Error parsing line:\n"
+          $stderr.write line.inspect + "\n"
+          $stderr.write "Buffer:\n"
+          $stderr.write buffer.inspect + "\n"
           next
         end
 
-        if fields.first == "#x-record-type"
+        if fields and fields.first == "#x-record-type"
           headers = fields
           headers[0] = "x-record-type"
-          #p headers
         else 
-          if headers and fields.first[0,1] != '#'
+          if headers and fields and fields.first[0,1] != '#'
             update =  Hash[headers.zip(fields)]
             update['service'] = "truesight"
+            # TODO: handle errors sending to Riemann
             c.tcp << update
           end
         end
